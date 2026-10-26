@@ -1,0 +1,86 @@
+{
+  "setup": {
+    "seeds": 5,
+    "steps": 250,
+    "size": 64,
+    "lr": 0.0003,
+    "output": "results/latent_long_250.json"
+  },
+  "completed_seeds": 1,
+  "records": [
+    {
+      "seed": 0,
+      "model": "latent_diffusion",
+      "history": [
+        {
+          "step": 50,
+          "validation_exact": 0.05000000074505806,
+          "train_exact": 0.3375000059604645,
+          "loss": 1.0222781896591187
+        },
+        {
+          "step": 100,
+          "validation_exact": 0.15000000596046448,
+          "train_exact": 0.675000011920929,
+          "loss": 0.5826507210731506
+        },
+        {
+          "step": 150,
+          "validation_exact": 0.20000000298023224,
+          "train_exact": 0.862500011920929,
+          "loss": 0.3504350185394287
+        },
+        {
+          "step": 200,
+          "validation_exact": 0.20000000298023224,
+          "train_exact": 0.9375,
+          "loss": 0.16770252585411072
+        },
+        {
+          "step": 250,
+          "validation_exact": 0.20000000298023224,
+          "train_exact": 0.949999988079071,
+          "loss": 0.10956335812807083
+        }
+      ],
+      "parameters": 242382
+    },
+    {
+      "seed": 0,
+      "model": "latent_ar",
+      "history": [
+        {
+          "step": 50,
+          "validation_exact": 0.10000000149011612,
+          "train_exact": 0.4749999940395355,
+          "loss": 0.9104445576667786
+        },
+        {
+          "step": 100,
+          "validation_exact": 0.15000000596046448,
+          "train_exact": 0.8374999761581421,
+          "loss": 0.37221843004226685
+        },
+        {
+          "step": 150,
+          "validation_exact": 0.20000000298023224,
+          "train_exact": 1.0,
+          "loss": 0.07557834684848785
+        },
+        {
+          "step": 200,
+          "validation_exact": 0.10000000149011612,
+          "train_exact": 1.0,
+          "loss": 0.02174621820449829
+        },
+        {
+          "step": 250,
+          "validation_exact": 0.20000000298023224,
+          "train_exact": 1.0,
+          "loss": 0.01365345437079668
+        }
+      ],
+      "parameters": 238094
+    }
+  ]
+}
