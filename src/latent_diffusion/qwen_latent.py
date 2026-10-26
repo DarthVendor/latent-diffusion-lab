@@ -61,6 +61,7 @@ class QwenLatentDiffusion(nn.Module):
             self.thought = nn.Linear(hidden, hidden, bias=False)
             nn.init.eye_(self.thought.weight)
         self.last_parts = {}
+        self._aux_detail = None
 
     @property
     def device(self):
@@ -125,8 +126,11 @@ class QwenLatentDiffusion(nn.Module):
         plen, r = pmask.shape[1], self.steps
         head = self.lm.get_output_embeddings()
         # first token is predicted from the last latent position, the rest by teacher forcing over the latents
-        losses = [F.cross_entropy(head(h_last)[:, :self.vocab].float(), sol[:, 0], reduction="none")]
-        valid = [sol_mask[:, 0]]
+        first = head(h_last)[:, :self.vocab].float()
+        ce = torch.zeros(b, s, device=sol.device)
+        pred = torch.zeros(b, s, dtype=torch.long, device=sol.device)
+        ce[:, 0] = F.cross_entropy(first, sol[:, 0], reduction="none")
+        pred[:, 0] = first.argmax(-1)
         if s > 1:
             emb = self._embed(sol[:, :-1])
             allowed = torch.zeros(b, s - 1, plen + s - 1, dtype=torch.bool, device=sol.device)
@@ -138,11 +142,12 @@ class QwenLatentDiffusion(nn.Module):
             h = self._forward(emb, pos, bias, cache, 1)
             cache.crop(plen)  # canvas must see the clean prefix
             sel = sol_mask[:, 1:].bool()
-            losses.append(torch.zeros(b, s - 1, device=sol.device))
-            losses[-1][sel] = F.cross_entropy(head(h[sel])[:, :self.vocab].float(), sol[:, 1:][sel], reduction="none")
-            valid.append(sol_mask[:, 1:])
-        ce, v = torch.cat([x.reshape(b, -1) for x in losses], 1), torch.cat([x.reshape(b, -1) for x in valid], 1)
-        return (ce * v).sum() / v.sum().clamp_min(1)
+            lg = head(h[sel])[:, :self.vocab].float()
+            ce[:, 1:][sel] = F.cross_entropy(lg, sol[:, 1:][sel], reduction="none")
+            pred[:, 1:][sel] = lg.argmax(-1)
+        if self._aux_detail is not None:   # diagnostics only (scripts/diagnose_latents.py)
+            self._aux_detail.append(dict(ce=ce.detach(), pred=pred, target=sol, valid=sol_mask))
+        return (ce * sol_mask).sum() / sol_mask.sum().clamp_min(1)
 
     def loss(self, prompt_ids, prompt_mask, target, full_mask_prob=0.75, stochastic=False, sol=None, sol_mask=None,
              aux_weight=0.0):
