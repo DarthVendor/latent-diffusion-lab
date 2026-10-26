@@ -27,6 +27,7 @@ nohup bash -c 'sleep $((MAX_HOURS * 3600)); vastai set api-key \$CONTAINER_API_K
 set -ex
 nvidia-smi
 git clone --depth 1 --branch $REF $REPO_URL $R && cd $R
+apt-get update -qq && apt-get install -y -qq build-essential   # torch.compile needs a C compiler; the runtime image has none
 pip install -r requirements-gpu.txt && pip install -e .
 mkdir -p results runs
 python scripts/bench_qwen_ar.py --smoke --out results/ar_smoke.json    # fail fast if the GPU path is broken
