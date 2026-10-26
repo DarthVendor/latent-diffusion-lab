@@ -1,0 +1,57 @@
+{
+  "description": "Fresh run with new recurrent transformer and patched masking; one seed, 80 training and 20 held-out digit pairs",
+  "seed": 23,
+  "steps": 250,
+  "learning_rate": 0.0003,
+  "full_mask_prob": 0.75,
+  "stochastic_train": false,
+  "history": [
+    {
+      "step": 1,
+      "baseline_train": 0,
+      "baseline_validation": 0,
+      "recurrent_train": 0,
+      "recurrent_validation": 0
+    },
+    {
+      "step": 50,
+      "baseline_train": 0.3,
+      "baseline_validation": 0,
+      "recurrent_train": 0.4,
+      "recurrent_validation": 0.05
+    },
+    {
+      "step": 100,
+      "baseline_train": 0.7125,
+      "baseline_validation": 0.1,
+      "recurrent_train": 0.6625,
+      "recurrent_validation": 0.25
+    },
+    {
+      "step": 150,
+      "baseline_train": 0.925,
+      "baseline_validation": 0.1,
+      "recurrent_train": 0.8375,
+      "recurrent_validation": 0.45
+    },
+    {
+      "step": 200,
+      "baseline_train": 1,
+      "recurrent_validation": 0.55,
+      "baseline_validation": 0.05,
+      "recurrent_train": 0.8875
+    },
+    {
+      "step": 250,
+      "baseline_train": 1,
+      "baseline_validation": 0.05,
+      "recurrent_train": 0.925,
+      "recurrent_validation": 0.6
+    }
+  ],
+  "caveats": [
+    "One seed and only 20 validation samples",
+    "Recurrent model adds more inference compute",
+    "Not proof of length/general arithmetic extrapolation"
+  ]
+}
