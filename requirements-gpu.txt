@@ -1,0 +1,5 @@
+# Pinned for the Vast.ai image pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime (torch comes from the image).
+transformers==4.51.3
+accelerate==1.6.0
+safetensors==0.5.3
+pyyaml==6.0.2
