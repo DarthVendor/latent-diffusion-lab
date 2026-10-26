@@ -10,11 +10,11 @@ pytestmark = pytest.mark.skipif(not os.environ.get("LDLAB_QWEN_TESTS"), reason="
 TOL = 2e-3  # absolute, on final-norm hidden states (scale ~50; observed diffs ~2e-4)
 
 
-@pytest.fixture(scope="module")
-def setup():
+@pytest.fixture(scope="module", params=["mixture", "hidden"])
+def setup(request):
     from latent_diffusion.qwen_latent import QwenLatentDiffusion
     torch.manual_seed(0)
-    m = QwenLatentDiffusion(steps=3, lora_r=0, dtype=torch.float32).eval()
+    m = QwenLatentDiffusion(steps=3, lora_r=0, dtype=torch.float32, latent_mode=request.param).eval()
     batch = m.tok(["What is 2+3?", "A much longer prompt: what is twelve times eleven, minus seven?"],
                   return_tensors="pt", padding=True)  # left padded, rows have different lengths
     return m, batch.input_ids, batch.attention_mask
@@ -82,3 +82,34 @@ def test_canvas_is_bidirectional_but_prefix_never_sees_it(setup):
         key_after = cache.layers[0].keys if hasattr(cache, "layers") else cache.key_cache[0]
     assert (ha[:, 0] - hb[:, 0]).abs().max() > 1e-3  # first canvas position reacts to a later token
     assert torch.equal(key_before, key_after)         # prefix KV untouched by canvas passes
+
+
+def test_aux_solution_loss_matches_uncached_reference_and_hides_prompt(setup):
+    """Solution tokens see only the latent positions (never the prompt) + earlier solution tokens."""
+    import torch.nn.functional as F
+    m, ids, am = setup
+    sol = torch.tensor([[11, 12, 13, 14, 15], [21, 22, 23, 0, 0]])
+    sm = torch.tensor([[1, 1, 1, 1, 1], [1, 1, 1, 0, 0]])
+    with torch.no_grad():
+        cache, pmask, start, latents, h_last = m.prefix(ids, am)
+        got = m.aux_solution_loss(cache, pmask, start, h_last, sol, sm)
+        # reference: one uncached forward over [prompt | latents | sol[:, :-1]] with an explicit 4D mask
+        b, r, s = len(ids), len(latents), sol.shape[1]
+        p = ids.shape[1]
+        emb = torch.cat([m._embed(ids)] + latents + [m._embed(sol[:, :-1])], dim=1)
+        n = p + r + s - 1
+        pm = torch.cat([am, am.new_ones(b, r)], dim=1).bool()
+        allowed = torch.zeros(b, n, n, dtype=torch.bool)
+        allowed[:, :p + r, :p + r] = torch.tril(torch.ones(p + r, p + r, dtype=torch.bool))[None] & pm[:, None, :]
+        allowed[:, p + r:, p:p + r] = True
+        allowed[:, p + r:, p + r:] = torch.tril(torch.ones(s - 1, s - 1, dtype=torch.bool))
+        bias = torch.zeros(b, 1, n, n).masked_fill(~allowed[:, None], torch.finfo(torch.float32).min)
+        pos = torch.cat([(am.cumsum(-1) - 1).clamp(min=0), am.sum(-1)[:, None] + torch.arange(r + s - 1)], dim=1)
+        hid = m.lm(inputs_embeds=emb, position_ids=pos, attention_mask=bias, use_cache=False,
+                   output_hidden_states=True, logits_to_keep=1).hidden_states[-1]
+        head = m.lm.get_output_embeddings()
+        first = F.cross_entropy(head(hid[:, p + r - 1])[:, :m.vocab], sol[:, 0], reduction="none")
+        rest = F.cross_entropy(head(hid[:, p + r:])[..., :m.vocab].transpose(1, 2), sol[:, 1:], reduction="none")
+        ce = torch.cat([first[:, None], rest], dim=1)
+        want = (ce * sm).sum() / sm.sum()
+    assert abs(got.item() - want.item()) < 1e-2

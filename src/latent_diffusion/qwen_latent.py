@@ -6,6 +6,11 @@ Layout of one sequence:  [left-padded prompt | R latent soft tokens | answer can
 * the canvas attends to the whole prefix and bidirectionally to itself (explicit 4D mask), reusing the
   prefix KV cache. The cache is cropped back after each denoising pass.
 * LoRA on the Qwen layers, plus a trainable latent projector, basis, and mask embedding.
+Latent modes: "mixture" = softmax mixture over a learned basis (collapsed to a constant in our diagnostics);
+"hidden" = continuous thought: the previous step's final hidden state is rescaled to embedding scale, passed
+through a learned linear map (init identity) and fed back as the next input embedding.
+Aux loss: the written solution must be reconstructable from the latent positions alone (solution tokens
+cannot attend to the prompt), which forces per-problem information into the latents.
 """
 import math
 
@@ -18,8 +23,11 @@ from .diffusion import corrupt
 
 
 class QwenLatentDiffusion(nn.Module):
-    def __init__(self, name="Qwen/Qwen3-0.6B", steps=4, basis=512, tau=0.7, lora_r=16, dtype=torch.bfloat16):
+    def __init__(self, name="Qwen/Qwen3-0.6B", steps=4, basis=512, tau=0.7, lora_r=16, dtype=torch.bfloat16,
+                 latent_mode="mixture"):
         super().__init__()
+        assert latent_mode in ("mixture", "hidden")
+        self.latent_mode = latent_mode
         self.tok = AutoTokenizer.from_pretrained(name, padding_side="left")
         lm = AutoModelForCausalLM.from_pretrained(name, torch_dtype=dtype, attn_implementation="sdpa")
         rows, hidden = lm.get_input_embeddings().weight.shape
@@ -41,6 +49,11 @@ class QwenLatentDiffusion(nn.Module):
         self.norm = nn.LayerNorm(hidden)
         self.project = nn.Linear(hidden, basis)
         self.mask_vec = nn.Parameter(emb[:self.vocab].float().mean(0))
+        self.emb_rms = float(emb[:self.vocab].float().pow(2).mean().sqrt())
+        if latent_mode == "hidden":
+            self.thought = nn.Linear(hidden, hidden, bias=False)
+            nn.init.eye_(self.thought.weight)
+        self.last_parts = {}
 
     @property
     def device(self):
@@ -62,11 +75,16 @@ class QwenLatentDiffusion(nn.Module):
                           prompt_mask, cache, 1)[:, -1]
         latents = []
         for r in range(self.steps):
-            logits = self.project(self.norm(h.float()))
-            w = F.gumbel_softmax(logits, tau=self.tau) if stochastic else F.softmax(logits / self.tau, dim=-1)
-            e = (w @ self.basis).to(h.dtype)[:, None]
+            if self.latent_mode == "hidden":
+                hf = h.float()
+                e = (self.thought(hf / hf.pow(2).mean(-1, keepdim=True).add(1e-6).sqrt()) * self.emb_rms).to(h.dtype)[:, None]
+                w = None
+            else:
+                logits = self.project(self.norm(h.float()))
+                w = F.gumbel_softmax(logits, tau=self.tau) if stochastic else F.softmax(logits / self.tau, dim=-1)
+                e = (w @ self.basis).to(h.dtype)[:, None]
             if self._trace is not None:
-                self._trace.append((w.detach(), e.detach()))
+                self._trace.append((None if w is None else w.detach(), e.detach()))
             if self._latent_hook is not None:
                 e = self._latent_hook(e)
             latents.append(e)
@@ -85,13 +103,45 @@ class QwenLatentDiffusion(nn.Module):
         pos = start[:, None] + torch.arange(a, device=tokens.device)
         return self._forward(emb, pos, bias, cache, 1)[:, -a:]
 
-    def loss(self, prompt_ids, prompt_mask, target, full_mask_prob=0.75, stochastic=False):
-        """Masked-token cross-entropy on the answer canvas (no next-token shift: position i predicts token i)."""
-        cache, pmask, start, *_ = self.prefix(prompt_ids, prompt_mask, stochastic)
+    def aux_solution_loss(self, cache, pmask, start, h_last, sol, sol_mask):
+        """Next-token loss on the written solution given ONLY the latent positions (prompt hidden from it)."""
+        b, s = sol.shape
+        plen, r = pmask.shape[1], self.steps
+        head = self.lm.get_output_embeddings()
+        # first token is predicted from the last latent position, the rest by teacher forcing over the latents
+        losses = [F.cross_entropy(head(h_last)[:, :self.vocab].float(), sol[:, 0], reduction="none")]
+        valid = [sol_mask[:, 0]]
+        if s > 1:
+            emb = self._embed(sol[:, :-1])
+            allowed = torch.zeros(b, s - 1, plen + s - 1, dtype=torch.bool, device=sol.device)
+            allowed[:, :, plen - r:plen] = True                      # latent positions only, never the prompt
+            allowed[:, :, plen:] = torch.tril(torch.ones(s - 1, s - 1, dtype=torch.bool, device=sol.device))
+            bias = torch.zeros(b, 1, s - 1, plen + s - 1, dtype=emb.dtype, device=emb.device)
+            bias = bias.masked_fill(~allowed[:, None], torch.finfo(emb.dtype).min)
+            pos = start[:, None] + torch.arange(s - 1, device=sol.device)
+            h = self._forward(emb, pos, bias, cache, 1)
+            cache.crop(plen)  # canvas must see the clean prefix
+            sel = sol_mask[:, 1:].bool()
+            losses.append(torch.zeros(b, s - 1, device=sol.device))
+            losses[-1][sel] = F.cross_entropy(head(h[sel])[:, :self.vocab].float(), sol[:, 1:][sel], reduction="none")
+            valid.append(sol_mask[:, 1:])
+        ce, v = torch.cat([x.reshape(b, -1) for x in losses], 1), torch.cat([x.reshape(b, -1) for x in valid], 1)
+        return (ce * v).sum() / v.sum().clamp_min(1)
+
+    def loss(self, prompt_ids, prompt_mask, target, full_mask_prob=0.75, stochastic=False, sol=None, sol_mask=None,
+             aux_weight=0.0):
+        """Masked-token cross-entropy on the answer canvas (no next-token shift: position i predicts token i),
+        plus aux_weight * latent->solution reconstruction loss when a solution is given."""
+        cache, pmask, start, _, h_last = self.prefix(prompt_ids, prompt_mask, stochastic)
+        aux = None
+        if sol is not None and aux_weight > 0 and self.steps > 0:
+            aux = self.aux_solution_loss(cache, pmask, start, h_last, sol, sol_mask)
         noisy, masks, _ = corrupt(target, self.mask_id, self.pad_id, full_mask_prob=full_mask_prob)
         h = self.canvas_hidden(cache, pmask, start, noisy)
         logits = self.lm.get_output_embeddings()(h[masks])[:, :self.vocab].float()
-        return F.cross_entropy(logits, target[masks])
+        canvas = F.cross_entropy(logits, target[masks])
+        self.last_parts = dict(canvas=canvas.item(), aux=None if aux is None else aux.item())
+        return canvas if aux is None else canvas + aux_weight * aux
 
     @torch.no_grad()
     def generate(self, prompt_ids, prompt_mask, length, steps=8):

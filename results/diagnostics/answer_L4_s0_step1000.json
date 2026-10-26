@@ -1,0 +1,87 @@
+{
+ "A_gradients": {
+  "basis": {
+   "mean_grad_norm": 0.27928420901298523,
+   "signal_fraction": 0.6120308637619019,
+   "mean_cos_between_batches": 0.2895124852657318,
+   "n_params": 524288
+  },
+  "mask_vec": {
+   "mean_grad_norm": 2.516577959060669,
+   "signal_fraction": 0.7563371658325195,
+   "mean_cos_between_batches": 0.4442531168460846,
+   "n_params": 1024
+  },
+  "lora": {
+   "mean_grad_norm": 2.9956767559051514,
+   "signal_fraction": 0.4654170572757721,
+   "mean_cos_between_batches": 0.12861791253089905,
+   "n_params": 10092544
+  },
+  "project/norm": {
+   "mean_grad_norm": 0.6195550560951233,
+   "signal_fraction": 0.5618900656700134,
+   "mean_cos_between_batches": 0.28003382682800293,
+   "n_params": 526848
+  }
+ },
+ "B_latent_usefulness": {
+  "normal": {
+   "test_masked_loss_full_mask": 0.49578218327628243,
+   "test_exact": 0.0625
+  },
+  "latents_zeroed": {
+   "test_masked_loss_full_mask": 0.6057580179638333,
+   "test_exact": 0.0
+  },
+  "latents_shuffled_across_examples": {
+   "test_masked_loss_full_mask": 0.4911577237976922,
+   "test_exact": 0.0625
+  },
+  "no_latent_steps": {
+   "test_masked_loss_full_mask": 0.664536542362637,
+   "test_exact": 0.020833333333333332
+  }
+ },
+ "C_latents": [
+  {
+   "step": 0,
+   "weight_entropy_nats": 5.318872451782227,
+   "max_entropy": 6.238324625039508,
+   "top_weight": 0.10816490650177002,
+   "cross_example_cosine": 0.9725745320320129,
+   "norm": 0.3292792737483978
+  },
+  {
+   "step": 1,
+   "weight_entropy_nats": 4.968807220458984,
+   "max_entropy": 6.238324625039508,
+   "top_weight": 0.1570972502231598,
+   "cross_example_cosine": 0.973060131072998,
+   "norm": 0.3663462698459625
+  },
+  {
+   "step": 2,
+   "weight_entropy_nats": 5.185244083404541,
+   "max_entropy": 6.238324625039508,
+   "top_weight": 0.11663021892309189,
+   "cross_example_cosine": 0.9821489453315735,
+   "norm": 0.349543035030365
+  },
+  {
+   "step": 3,
+   "weight_entropy_nats": 5.1911725997924805,
+   "max_entropy": 6.238324625039508,
+   "top_weight": 0.11753061413764954,
+   "cross_example_cosine": 0.9873106479644775,
+   "norm": 0.34878402948379517
+  }
+ ],
+ "D_per_token_full_mask": {
+  "answer_token_loss": 2.0098952912447747,
+  "fill_token_loss": 0.1221301674326777,
+  "answer_token_top1": 0.3333333333333333,
+  "n_answer_tokens": 57,
+  "n_fill_tokens": 231
+ }
+}

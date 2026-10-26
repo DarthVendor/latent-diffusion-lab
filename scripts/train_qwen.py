@@ -3,6 +3,12 @@
 --target answer    canvas = final number only (default; compare with Qwen's "forced" direct answer)
 --target solution  canvas = worked solution ending "#### n" (compare with Qwen's full reasoning)
 --latent-steps 0   ablation: same model and training, no latent reasoning steps
+--latent-mode hidden   continuous thoughts (hidden state fed back) instead of the basis mixture
+--aux-weight W     latent->solution reconstruction loss (solution tokens see only the latents)
+--fade F           CoT scaffold: early in training the first k solution steps are given as text in the
+                   assistant turn, k shrinking to 0 by fraction F of training; the latents must replace them
+Every eval also runs the shuffle test (latents swapped between examples): if exact match does not drop, the
+latents carry nothing problem-specific.
 Canvas is padded with <|im_end|> so the model learns where answers end. Resumes from runs/<name>/ckpt.pt.
 Examples: python scripts/train_qwen.py --steps 3000 --name a_s0
           python scripts/train_qwen.py --ar-only --eval-n 500        # Qwen baselines, once
@@ -43,10 +49,11 @@ def encode(tok, rows, target, canvas, end_id):
     suffix = ANSWER_SUFFIX if target == "answer" else ""
     items = [(r["question"], r["answer"].split("####")[-1].strip().replace(",", ""),
               tok(gold_text(r, target), add_special_tokens=False).input_ids) for r in rows]
-    items = [i for i in items if len(i[2]) < canvas]
+    pairs = [(it, r) for it, r in zip(items, rows) if len(it[2]) < canvas]
+    items, kept = [p[0] for p in pairs], [p[1] for p in pairs]
     enc = tok([prompt_text(tok, q, suffix) for q, _, _ in items], return_tensors="pt", padding=True)
     target_ids = torch.tensor([t + [end_id] * (canvas - len(t)) for _, _, t in items])
-    return enc.input_ids, enc.attention_mask, target_ids, [a for _, a, _ in items], [q for q, _, _ in items]
+    return enc.input_ids, enc.attention_mask, target_ids, [a for _, a, _ in items], [q for q, _, _ in items], kept
 
 
 def trim(ids, am):
@@ -56,16 +63,36 @@ def trim(ids, am):
 
 
 @torch.no_grad()
-def diffusion_accuracy(m, data, canvas, steps, target, bs=16):
-    m.eval(); ok, t0 = 0, time.time()
-    ids, am, _, answers, _ = data
+def diffusion_accuracy(m, data, canvas, steps, target, bs=16, hook=None):
+    m.eval(); ok, t0 = 0, time.time(); m._latent_hook = hook
+    ids, am, _, answers, *_ = data
     for i in range(0, len(ids), bs):
         out = m.generate(*(x.cuda() for x in trim(ids[i:i + bs], am[i:i + bs])), canvas, steps)
         for row, gold in zip(out.tolist(), answers[i:i + bs]):
             text = m.tok.decode(row[:row.index(m.end_id)] if m.end_id in row else row)
             ok += number(text, last=target == "solution") == number(gold)
-    torch.cuda.synchronize()
+    torch.cuda.synchronize(); m._latent_hook = None
     return ok / len(ids), time.time() - t0
+
+
+def train_batch(m, rows, idx, progress, a, canvas, end_id):
+    """Prompts with a CoT scaffold that fades out (curriculum), answer canvas targets, solution tokens for the aux loss."""
+    keep = max(0.0, 1.0 - progress / a.fade) if a.fade > 0 else 0.0
+    texts, tgts, sols = [], [], []
+    for i in idx.tolist():
+        r = rows[i]; ans = r["answer"].split("####")[-1].strip().replace(",", "")
+        steps = [x for x in re.sub(r"<<.*?>>", "", r["answer"].split("####")[0]).strip().split("\n") if x]
+        k = int(len(steps) * keep)
+        text = prompt_text(m.tok, r["question"], ANSWER_SUFFIX if a.target == "answer" else "")
+        texts.append(text + ("\n".join(steps[:k]) + "\n" if k else ""))
+        t = m.tok(ans, add_special_tokens=False).input_ids
+        tgts.append(t + [end_id] * (canvas - len(t)))
+        sols.append(m.tok("\n".join(steps), add_special_tokens=False).input_ids[:a.sol_len])
+    enc = m.tok(texts, return_tensors="pt", padding=True)
+    n = max(map(len, sols))
+    sol = torch.tensor([x + [m.pad_id] * (n - len(x)) for x in sols])
+    sol_mask = torch.tensor([[1] * len(x) + [0] * (n - len(x)) for x in sols])
+    return (*trim(enc.input_ids, enc.attention_mask), torch.tensor(tgts), sol, sol_mask)
 
 
 @torch.no_grad()
@@ -100,6 +127,11 @@ if __name__ == "__main__":
     ap.add_argument("--eval-n", type=int, default=200)
     ap.add_argument("--eval-every", type=int, default=100)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--latent-mode", choices=["mixture", "hidden"], default="mixture")
+    ap.add_argument("--aux-weight", type=float, default=0.0)
+    ap.add_argument("--fade", type=float, default=0.0, help="fraction of training over which the CoT scaffold fades (0 = off)")
+    ap.add_argument("--sol-len", type=int, default=160, help="max solution tokens for the aux loss")
+    ap.add_argument("--accum", type=int, default=1, help="micro-batches per optimizer step (bs is per micro-batch)")
     ap.add_argument("--ar-only", action="store_true", help="only run the plain-Qwen baselines")
     a = ap.parse_args()
     a.canvas = a.canvas or (12 if a.target == "answer" else 256)
@@ -116,7 +148,7 @@ if __name__ == "__main__":
         (root / "ar_baselines.json").write_text(json.dumps(out, indent=1)); print(json.dumps(out, indent=1))
         raise SystemExit
 
-    m = QwenLatentDiffusion(steps=a.latent_steps).cuda()
+    m = QwenLatentDiffusion(steps=a.latent_steps, latent_mode=a.latent_mode).cuda()
     m.end_id = m.tok.convert_tokens_to_ids("<|im_end|>")
     tr = encode(m.tok, ds["train"], a.target, a.canvas, m.end_id)
     te = encode(m.tok, ds["test"].select(range(a.eval_n)), a.target, a.canvas, m.end_id)
@@ -130,17 +162,23 @@ if __name__ == "__main__":
         print("resumed from step", step, flush=True)
 
     history = []
+    train_rows = tr[5]
     while step < a.steps:
-        m.train()
-        idx = torch.randint(len(tr[0]), (a.bs,))
-        loss = m.loss(*(x.cuda() for x in trim(tr[0][idx], tr[1][idx])), tr[2][idx].cuda())
-        opt.zero_grad(set_to_none=True); loss.backward()
+        m.train(); opt.zero_grad(set_to_none=True)
+        for _ in range(a.accum):
+            idx = torch.randint(len(train_rows), (a.bs,))
+            ids, am, tgt, sol, sm = (x.cuda() for x in train_batch(m, train_rows, idx, step / a.steps, a, a.canvas, m.end_id))
+            loss = m.loss(ids, am, tgt, sol=sol, sol_mask=sm, aux_weight=a.aux_weight)
+            (loss / a.accum).backward()
         torch.nn.utils.clip_grad_norm_(m.trainable(), 1.0); opt.step(); step += 1
         if step % 10 == 0:
-            print(f"step {step} loss {loss.item():.3f} peak {torch.cuda.max_memory_allocated() / 2**30:.1f}GB", flush=True)
+            print(f"step {step} loss {loss.item():.3f} parts {m.last_parts} peak {torch.cuda.max_memory_allocated() / 2**30:.1f}GB", flush=True)
         if step % a.eval_every == 0 or step == a.steps:
             acc, secs = diffusion_accuracy(m, te, a.canvas, 8, a.target)
-            history.append(dict(step=step, loss=loss.item(), diffusion_exact=acc, eval_s=secs))
+            shuf, _ = diffusion_accuracy(m, te, a.canvas, 8, a.target, hook=lambda e: e.roll(1, 0))
+            zero, _ = diffusion_accuracy(m, te, a.canvas, 8, a.target, hook=torch.zeros_like)
+            history.append(dict(step=step, loss=loss.item(), diffusion_exact=acc, shuffled_latents_exact=shuf,
+                                zeroed_latents_exact=zero, eval_s=secs))
             print(history[-1], flush=True)
             torch.save({"model": m.extra_state(), "opt": opt.state_dict(), "step": step}, ckpt)
 
