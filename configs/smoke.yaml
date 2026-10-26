@@ -12,7 +12,7 @@ training:
   device: cpu
   threads: 1
   iterations: 5
-  lr: 0.003
+  lr: 0.0003
   eval_every: 5
   sampling_steps: 2
   output_dir: runs/smoke
