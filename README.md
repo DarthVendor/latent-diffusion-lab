@@ -43,9 +43,9 @@ splits, and multiple seeds before drawing conclusions.
 
 ```text
 Prompt IDs
-   -> causal prompt GRU
+   -> causal prompt causal transformer
    -> initial h
-   -> [linear K + Gumbel softmax + learned basis + GRUCell] x R (optional)
+   -> [linear K + Gumbel softmax + learned basis + causal transformerCell] x R (optional)
    -> latent trajectory [B,R+1,D]
    -> learned attention pooling [B,M,D]
    -> masked target IDs + diffusion timestep embedding
@@ -54,7 +54,7 @@ Prompt IDs
    -> confidence-based iterative unmasking
 ```
 
-**Technical limits:** The GRU-based latent steps are only *inspired* by SLT; they do
+**Technical limits:** The transformer-based latent steps are only *inspired* by SLT; they do
 not append soft embeddings through all original Qwen transformer layers. Likewise,
 the decoder uses a MaskGIT-style unmasking schedule and a simplified masked
 cross-entropy objective, not an exact reproduction of LLaDA. The two backbone
@@ -113,3 +113,9 @@ The four pytest tests passed locally. A 200-step CPU addition run (single seed, 
 | SLT-inspired + diffusion | 97.5% | 35.0% |
 
 These unstable, small-data results are **not evidence of a benefit** from latent reasoning. See `results/validation200.json`; checkpoints from this specific run are excluded from the distributed ZIP to keep it small.
+
+## October 2026 recurrent-transformer experiment
+
+The toy reasoner now runs a **causal transformer** on the growing prompt/soft-token sequence, feeding each learned continuous latent embedding back through the same transformer on every step. This is no longer a GRU state-update loop. The optional pretrained Qwen adapter is still experimental and is not used by the main training CLI.
+
+Training fixes: 75% forced fully masked outputs, mask timestep recomputed from actual corruption, deterministic latent training/evaluation by default, lower learning rate (3e-4), and checkpoints including AdamW state. See `results/recurrent_transformer_250_summary.json` for the single-seed CPU run: at step 250, baseline validation accuracy was 5% and recurrent-transformer validation accuracy was 60% on a 20-example held-out set. **Do not interpret this as validated generalization**; run repeated seeds and larger arithmetic datasets next.
