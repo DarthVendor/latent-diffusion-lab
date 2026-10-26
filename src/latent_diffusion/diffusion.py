@@ -3,7 +3,7 @@ import math
 import torch
 from torch.nn import functional as F
 
-def corrupt(target, mask_id, pad_id):
+def corrupt(target, mask_id, pad_id, full_mask_prob=0.75):
     b, _ = target.shape
     valid = target.ne(pad_id)
     if not valid.any(dim=-1).all():

@@ -3,3 +3,4 @@ transformers==4.51.3
 accelerate==1.6.0
 safetensors==0.5.3
 pyyaml==6.0.2
+peft==0.15.2
