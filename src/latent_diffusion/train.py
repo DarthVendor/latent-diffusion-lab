@@ -43,8 +43,8 @@ def run(cfg):
         for iteration in range(1, iterations + 1):
             model.train()
             x, target = train_pair
-            noisy, mask, t = corrupt(target, mc.mask_id, mc.pad_id)
-            logits = model(x, noisy, t, stochastic=active)
+            noisy, mask, t = corrupt(target, mc.mask_id, mc.pad_id, full_mask_prob=float(run_cfg.get('full_mask_prob', 0.75)))
+            logits = model(x, noisy, t, stochastic=active and bool(run_cfg.get('stochastic_train', False)))
             loss = masked_loss(logits, target, mask)
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -64,6 +64,7 @@ def run(cfg):
             'examples': [{'input': a, 'target': b, 'prediction': c}
                          for a, b, c in zip(val_pair[0][:10].tolist(), val_pair[1][:10].tolist(), pred[:10].tolist())]
         }
-        torch.save({'state_dict': model.state_dict(), 'model_config': asdict(mc)}, root / f'{name}.pt')
+        torch.save({'state_dict': model.state_dict(), 'model_config': asdict(mc),
+                    'optimizer_state_dict': optimizer.state_dict(), 'steps': iterations}, root / f'{name}.pt')
     (root / 'results.json').write_text(json.dumps(results, indent=2))
     return results
