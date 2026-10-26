@@ -24,10 +24,14 @@ from .diffusion import corrupt
 
 class QwenLatentDiffusion(nn.Module):
     def __init__(self, name="Qwen/Qwen3-0.6B", steps=4, basis=512, tau=0.7, lora_r=16, dtype=torch.bfloat16,
-                 latent_mode="mixture"):
+                 latent_mode="mixture", canvas_latents_only=False):
         super().__init__()
         assert latent_mode in ("mixture", "hidden")
+        assert not canvas_latents_only or steps > 0, "a latents-only canvas needs latent steps"
         self.latent_mode = latent_mode
+        # True: the answer canvas attends to the latent positions + itself, never the prompt tokens, so the
+        # prompt KV can be freed once the latent steps are done (the latents must then carry the problem).
+        self.canvas_latents_only = canvas_latents_only
         self.tok = AutoTokenizer.from_pretrained(name, padding_side="left")
         lm = AutoModelForCausalLM.from_pretrained(name, torch_dtype=dtype, attn_implementation="sdpa")
         rows, hidden = lm.get_input_embeddings().weight.shape
@@ -97,7 +101,10 @@ class QwenLatentDiffusion(nn.Module):
         b, a = tokens.shape
         emb = self._embed(tokens)
         emb = torch.where(tokens.eq(self.mask_id)[..., None], self.mask_vec.to(emb.dtype), emb)
-        visible = torch.cat([prefix_mask.bool(), prefix_mask.new_ones(b, a).bool()], dim=1)[:, None, None, :]
+        pm = prefix_mask.bool()
+        if self.canvas_latents_only:
+            pm = pm.clone(); pm[:, :-self.steps] = False
+        visible = torch.cat([pm, pm.new_ones(b, a)], dim=1)[:, None, None, :]
         bias = torch.zeros(b, 1, a, visible.shape[-1], dtype=emb.dtype, device=emb.device)
         bias = bias.masked_fill(~visible, torch.finfo(emb.dtype).min)
         pos = start[:, None] + torch.arange(a, device=tokens.device)

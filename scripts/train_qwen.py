@@ -132,6 +132,7 @@ if __name__ == "__main__":
     ap.add_argument("--fade", type=float, default=0.0, help="fraction of training over which the CoT scaffold fades (0 = off)")
     ap.add_argument("--sol-len", type=int, default=160, help="max solution tokens for the aux loss")
     ap.add_argument("--accum", type=int, default=1, help="micro-batches per optimizer step (bs is per micro-batch)")
+    ap.add_argument("--canvas-latents-only", action="store_true", help="answer canvas cannot see the prompt, only the latents")
     ap.add_argument("--ar-only", action="store_true", help="only run the plain-Qwen baselines")
     a = ap.parse_args()
     a.canvas = a.canvas or (12 if a.target == "answer" else 256)
@@ -148,7 +149,7 @@ if __name__ == "__main__":
         (root / "ar_baselines.json").write_text(json.dumps(out, indent=1)); print(json.dumps(out, indent=1))
         raise SystemExit
 
-    m = QwenLatentDiffusion(steps=a.latent_steps, latent_mode=a.latent_mode).cuda()
+    m = QwenLatentDiffusion(steps=a.latent_steps, latent_mode=a.latent_mode, canvas_latents_only=a.canvas_latents_only).cuda()
     m.end_id = m.tok.convert_tokens_to_ids("<|im_end|>")
     tr = encode(m.tok, ds["train"], a.target, a.canvas, m.end_id)
     te = encode(m.tok, ds["test"].select(range(a.eval_n)), a.target, a.canvas, m.end_id)

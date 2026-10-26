@@ -36,7 +36,7 @@ def test_cached_latent_steps_match_uncached(setup):
     assert (h_cached - h_ref).abs().max() < TOL
 
 
-def _reference_canvas(m, ids, am, latents, tokens):
+def _reference_canvas(m, ids, am, latents, tokens, latents_only=False):
     """Uncached full-sequence forward with an explicit 4D mask: causal prefix, canvas sees all non-pad prefix + canvas."""
     b, a, r = len(ids), tokens.shape[1], len(latents)
     p = ids.shape[1] + r
@@ -46,6 +46,8 @@ def _reference_canvas(m, ids, am, latents, tokens):
     allowed = torch.zeros(b, p + a, p + a, dtype=torch.bool)
     allowed[:, :p, :p] = torch.tril(torch.ones(p, p, dtype=torch.bool))[None] & pm[:, None, :]
     allowed[:, p:, :p] = pm[:, None, :]
+    if latents_only:
+        allowed[:, p:, :p - r] = False  # canvas rows cannot see the prompt tokens
     allowed[:, p:, p:] = True
     bias = torch.zeros(b, 1, p + a, p + a).masked_fill(~allowed[:, None], torch.finfo(torch.float32).min)
     n = am.sum(-1)
@@ -113,3 +115,21 @@ def test_aux_solution_loss_matches_uncached_reference_and_hides_prompt(setup):
         ce = torch.cat([first[:, None], rest], dim=1)
         want = (ce * sm).sum() / sm.sum()
     assert abs(got.item() - want.item()) < 1e-2
+
+
+def test_latents_only_canvas_cannot_see_the_prompt(setup):
+    m, ids, am = setup
+    tokens = torch.tensor([[m.mask_id, 5, m.mask_id, 7], [m.mask_id] * 4])
+    with torch.no_grad():
+        cache, pmask, start, latents, _ = m.prefix(ids, am)
+        m.canvas_latents_only = True
+        try:
+            got = m.canvas_hidden(cache, pmask, start, tokens)
+            ref = _reference_canvas(m, ids, am, latents, tokens, latents_only=True)
+            cache.crop(pmask.shape[1])
+            m.canvas_latents_only = False
+            full = m.canvas_hidden(cache, pmask, start, tokens)
+        finally:
+            m.canvas_latents_only = False
+    assert (got - ref).abs().max() < TOL      # matches an uncached run where canvas rows skip the prompt
+    assert (got - full).abs().max() > 1e-2    # and really differs from seeing the prompt
