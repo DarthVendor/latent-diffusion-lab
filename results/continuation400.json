@@ -1,0 +1,138 @@
+{
+  "note": "Resumed weights from step 200; AdamW optimizer restarted because original states were not stored.",
+  "training": {
+    "additional_steps": 200,
+    "learning_rate": 0.003,
+    "seed": 223
+  },
+  "models": {
+    "baseline": {
+      "history": [
+        {
+          "step": 225,
+          "loss": 0.1343,
+          "train_exact": 0.8374999761581421,
+          "validation_exact": 0.5
+        },
+        {
+          "step": 250,
+          "loss": 0.03008,
+          "train_exact": 0.9750000238418579,
+          "validation_exact": 0.6499999761581421
+        },
+        {
+          "step": 275,
+          "loss": 0.06156,
+          "train_exact": 0.9375,
+          "validation_exact": 0.5
+        },
+        {
+          "step": 300,
+          "loss": 0.05698,
+          "train_exact": 0.8999999761581421,
+          "validation_exact": 0.3499999940395355
+        },
+        {
+          "step": 325,
+          "loss": 0.02438,
+          "train_exact": 1.0,
+          "validation_exact": 0.30000001192092896
+        },
+        {
+          "step": 350,
+          "loss": 0.01511,
+          "train_exact": 0.949999988079071,
+          "validation_exact": 0.4000000059604645
+        },
+        {
+          "step": 375,
+          "loss": 0.01893,
+          "train_exact": 0.987500011920929,
+          "validation_exact": 0.25
+        },
+        {
+          "step": 400,
+          "loss": 0.09805,
+          "train_exact": 0.949999988079071,
+          "validation_exact": 0.3499999940395355
+        }
+      ],
+      "final": {
+        "step": 400,
+        "loss": 0.09805,
+        "train_exact": 0.949999988079071,
+        "validation_exact": 0.3499999940395355
+      },
+      "best_validation": {
+        "step": 250,
+        "loss": 0.03008,
+        "train_exact": 0.9750000238418579,
+        "validation_exact": 0.6499999761581421
+      }
+    },
+    "latent_diffusion": {
+      "history": [
+        {
+          "step": 225,
+          "loss": 0.02129,
+          "train_exact": 0.987500011920929,
+          "validation_exact": 0.30000001192092896
+        },
+        {
+          "step": 250,
+          "loss": 0.04416,
+          "train_exact": 1.0,
+          "validation_exact": 0.44999998807907104
+        },
+        {
+          "step": 275,
+          "loss": 0.00114,
+          "train_exact": 1.0,
+          "validation_exact": 0.4000000059604645
+        },
+        {
+          "step": 300,
+          "loss": 0.00052,
+          "train_exact": 1.0,
+          "validation_exact": 0.44999998807907104
+        },
+        {
+          "step": 325,
+          "loss": 0.00036,
+          "train_exact": 1.0,
+          "validation_exact": 0.44999998807907104
+        },
+        {
+          "step": 350,
+          "loss": 0.00025,
+          "train_exact": 1.0,
+          "validation_exact": 0.44999998807907104
+        },
+        {
+          "step": 375,
+          "loss": 0.00023,
+          "train_exact": 1.0,
+          "validation_exact": 0.44999998807907104
+        },
+        {
+          "step": 400,
+          "loss": 0.00018,
+          "train_exact": 1.0,
+          "validation_exact": 0.44999998807907104
+        }
+      ],
+      "final": {
+        "step": 400,
+        "loss": 0.00018,
+        "train_exact": 1.0,
+        "validation_exact": 0.44999998807907104
+      },
+      "best_validation": {
+        "step": 250,
+        "loss": 0.04416,
+        "train_exact": 1.0,
+        "validation_exact": 0.44999998807907104
+      }
+    }
+  }
+}

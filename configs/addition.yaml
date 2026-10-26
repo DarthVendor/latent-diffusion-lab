@@ -1,0 +1,19 @@
+model:
+  d_model: 64
+  n_heads: 4
+  decoder_layers: 2
+  reasoning_steps: 4
+  latent_basis: 128
+  temperature: 0.7
+  max_answer_length: 8
+  memory_slots: 4
+training:
+  seed: 23
+  split_seed: 17
+  device: cpu
+  threads: 1
+  iterations: 500
+  lr: 0.003
+  eval_every: 100
+  sampling_steps: 4
+  output_dir: runs/addition
