@@ -21,34 +21,43 @@ class ModelConfig:
     memory_slots: int = 4
 
 class LatentReasoner(nn.Module):
-    """Small GRU toy backbone with continuous Gumbel-softmax reasoning updates."""
-    def __init__(self, cfg):
+    """Recurrent causal transformer; append continuous soft tokens and re-run backbone."""
+    def __init__(self, cfg: ModelConfig):
         super().__init__()
-        d = cfg.d_model
         self.cfg = cfg
+        d = cfg.d_model
         self.embed = nn.Embedding(cfg.vocab_size, d)
-        self.prompt_position = nn.Embedding(16, d)
-        self.prompt_encoder = nn.GRU(d, d, batch_first=True)
+        self.position = nn.Embedding(16 + cfg.reasoning_steps, d)
+        layer = nn.TransformerEncoderLayer(d, cfg.n_heads, 4*d, dropout=cfg.dropout,
+                                          batch_first=True, activation='gelu')
+        self.transformer = nn.TransformerEncoder(layer, num_layers=2,
+                                                 enable_nested_tensor=False)
         self.norm = nn.LayerNorm(d)
         self.project = nn.Linear(d, cfg.latent_basis)
         self.basis = nn.Parameter(torch.randn(cfg.latent_basis, d) * 0.12)
-        self.transition = nn.GRUCell(d, d)
 
-    def forward(self, prompt, stochastic=False):
+    def _causal_forward(self, embeddings):
+        n = embeddings.shape[1]
+        positions = torch.arange(n, device=embeddings.device)
+        causal = torch.ones(n, n, device=embeddings.device, dtype=torch.bool).triu(1)
+        return self.transformer(embeddings + self.position(positions), mask=causal)
+
+    def forward(self, prompt: torch.Tensor, stochastic: bool = False):
         if prompt.shape[1] > 16:
             raise ValueError('toy prompt exceeds max length 16')
-        pos = self.prompt_position(torch.arange(prompt.shape[1], device=prompt.device))
-        _, state = self.prompt_encoder(self.embed(prompt) + pos)
-        state = state.squeeze(0)
+        context = self.embed(prompt)
+        state = self._causal_forward(context)[:, -1]
         states = [state]
         if self.cfg.use_latent:
             for _ in range(self.cfg.reasoning_steps):
                 logits = self.project(self.norm(state))
                 weights = (F.gumbel_softmax(logits, tau=self.cfg.temperature)
                            if stochastic else F.softmax(logits / self.cfg.temperature, dim=-1))
-                state = self.transition(weights @ self.basis, state)
+                context = torch.cat([context, (weights @ self.basis).unsqueeze(1)], dim=1)
+                state = self._causal_forward(context)[:, -1]
                 states.append(state)
         return torch.stack(states, dim=1)
+
 
 class MemoryCompressor(nn.Module):
     def __init__(self, cfg):
