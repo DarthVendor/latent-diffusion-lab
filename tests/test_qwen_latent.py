@@ -7,7 +7,7 @@ import pytest
 import torch
 
 pytestmark = pytest.mark.skipif(not os.environ.get("LDLAB_QWEN_TESTS"), reason="set LDLAB_QWEN_TESTS=1 (downloads Qwen3-0.6B)")
-TOL = 2e-2  # absolute, on final-norm hidden states
+TOL = 2e-3  # absolute, on final-norm hidden states (scale ~50; observed diffs ~2e-4)
 
 
 @pytest.fixture(scope="module")
