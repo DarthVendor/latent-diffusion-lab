@@ -34,6 +34,7 @@ class QwenLatentDiffusion(nn.Module):
         else:
             lm.requires_grad_(False)
         self.lm, self.steps, self.tau = lm, steps, tau
+        self._latent_hook, self._trace = None, None  # diagnostics only: edit / record latents (scripts/diagnose.py)
         emb = lm.get_input_embeddings().weight.detach()
         # latent basis starts as real token embeddings so soft tokens begin in-distribution
         self.basis = nn.Parameter(emb[torch.randperm(self.vocab)[:basis]].float().clone())
@@ -64,6 +65,10 @@ class QwenLatentDiffusion(nn.Module):
             logits = self.project(self.norm(h.float()))
             w = F.gumbel_softmax(logits, tau=self.tau) if stochastic else F.softmax(logits / self.tau, dim=-1)
             e = (w @ self.basis).to(h.dtype)[:, None]
+            if self._trace is not None:
+                self._trace.append((w.detach(), e.detach()))
+            if self._latent_hook is not None:
+                e = self._latent_hook(e)
             latents.append(e)
             mask = torch.cat([mask, mask.new_ones(len(mask), 1)], dim=1)
             h = self._forward(e, (n + r)[:, None], mask, cache, 1)[:, -1]
