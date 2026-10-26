@@ -137,7 +137,7 @@ if __name__ == "__main__":
         opt.zero_grad(set_to_none=True); loss.backward()
         torch.nn.utils.clip_grad_norm_(m.trainable(), 1.0); opt.step(); step += 1
         if step % 10 == 0:
-            print(f"step {step} loss {loss.item():.3f}", flush=True)
+            print(f"step {step} loss {loss.item():.3f} peak {torch.cuda.max_memory_allocated() / 2**30:.1f}GB", flush=True)
         if step % a.eval_every == 0 or step == a.steps:
             acc, secs = diffusion_accuracy(m, te, a.canvas, 8, a.target)
             history.append(dict(step=step, loss=loss.item(), diffusion_exact=acc, eval_s=secs))
