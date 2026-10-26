@@ -2,7 +2,9 @@
 
 Fixed-length timing: min_new_tokens == max_new_tokens, so EOS never shortens a run.
 This measures latency/memory only; answer quality is NOT measured here.
-Usage: python scripts/bench_qwen_ar.py --smoke   |   python scripts/bench_qwen_ar.py --out results/ar_baseline.json
+Usage: python scripts/bench_qwen_ar.py --smoke | [--compiled] --out results/ar_baseline.json
+Report both eager and --compiled; the compiled run is the "optimized cached AR" baseline the plan requires.
+Warmup absorbs compile time (one compile per batch/length shape), so it is never in the timings.
 """
 import argparse, json, platform, time
 
@@ -33,6 +35,8 @@ def main():
     ap.add_argument("--thinking", action="store_true", help="Qwen3 thinking mode (default: non-thinking)")
     ap.add_argument("--warmup", type=int, default=2)
     ap.add_argument("--reps", type=int, default=5)
+    ap.add_argument("--compiled", action="store_true",
+                    help="static KV cache + torch.compile(reduce-overhead): removes HF eager launch overhead")
     ap.add_argument("--smoke", action="store_true", help="tiny run to prove the GPU path works")
     ap.add_argument("--out", default="results/ar_baseline.json")
     a = ap.parse_args()
@@ -43,6 +47,8 @@ def main():
     t0 = time.time()
     tok = AutoTokenizer.from_pretrained(a.model, padding_side="left")
     model = AutoModelForCausalLM.from_pretrained(a.model, torch_dtype=torch.bfloat16, attn_implementation="sdpa").cuda().eval()
+    if a.compiled:
+        model.forward = torch.compile(model.forward, mode="reduce-overhead", fullgraph=True)
     torch.cuda.synchronize()
     load_s = time.time() - t0
 
@@ -55,7 +61,8 @@ def main():
     for b in a.batches:
         inp = prompt_batch(b)
         for n in a.lengths:
-            gen = lambda: model.generate(**inp, max_new_tokens=n, min_new_tokens=n, do_sample=False, use_cache=True)
+            gen = lambda: model.generate(**inp, max_new_tokens=n, min_new_tokens=n, do_sample=False, use_cache=True,
+                                    **({"cache_implementation": "static"} if a.compiled else {}))
             with torch.inference_mode():
                 for _ in range(a.warmup):
                     gen()
@@ -68,7 +75,7 @@ def main():
                              peak_gb=torch.cuda.max_memory_allocated() / 2**30, all_e2e_s=tot))
             print(rows[-1], flush=True)
 
-    out = dict(model=a.model, thinking=a.thinking, dtype="bfloat16", attn="sdpa", load_s=load_s,
+    out = dict(model=a.model, thinking=a.thinking, compiled=a.compiled, dtype="bfloat16", attn="sdpa", load_s=load_s,
                gpu=torch.cuda.get_device_name(), cuda=torch.version.cuda, torch=torch.__version__,
                transformers=transformers.__version__, python=platform.python_version(), rows=rows)
     json.dump(out, open(a.out, "w"), indent=1)
