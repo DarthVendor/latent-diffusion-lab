@@ -24,8 +24,11 @@ from .diffusion import corrupt
 
 class QwenLatentDiffusion(nn.Module):
     def __init__(self, name="Qwen/Qwen3-0.6B", steps=4, basis=512, tau=0.7, lora_r=16, dtype=torch.bfloat16,
-                 latent_mode="mixture", canvas_latents_only=False):
+                 latent_mode="mixture", canvas_latents_only=False, prefix_adapter_off=False):
         super().__init__()
+        # True: the prefix (prompt + latents) runs with the LoRA adapter disabled and no grad, so its KV cache is
+        # exactly the base model's. A speculative drafter can then read the TARGET's cache with no cache of its own.
+        self.prefix_adapter_off = prefix_adapter_off
         assert latent_mode in ("mixture", "hidden")
         assert not canvas_latents_only or steps > 0, "a latents-only canvas needs latent steps"
         self.latent_mode = latent_mode
@@ -72,6 +75,12 @@ class QwenLatentDiffusion(nn.Module):
         return out.hidden_states[-1]  # after Qwen's final norm
 
     def prefix(self, prompt_ids, prompt_mask, stochastic=False):
+        if self.prefix_adapter_off:
+            with torch.no_grad(), self.lm.disable_adapter():
+                return self._prefix(prompt_ids, prompt_mask, stochastic)
+        return self._prefix(prompt_ids, prompt_mask, stochastic)
+
+    def _prefix(self, prompt_ids, prompt_mask, stochastic=False):
         """Run prompt + R latent steps. Returns (cache, mask over prefix, next position per row, latent embeds, final hidden)."""
         cache, mask = DynamicCache(), prompt_mask
         n = prompt_mask.sum(-1)  # real prompt length; left padding means the last slot is always real

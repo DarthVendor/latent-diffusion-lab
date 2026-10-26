@@ -88,14 +88,16 @@ if __name__ == "__main__":
     ap.add_argument("--n-train", type=int, default=3000); ap.add_argument("--n-eval", type=int, default=100)
     ap.add_argument("--K", type=int, default=8); ap.add_argument("--steps", type=int, default=1500)
     ap.add_argument("--bs", type=int, default=16); ap.add_argument("--lr", type=float, default=1e-4)
+    ap.add_argument("--name", default="draft"); ap.add_argument("--data", default="runs/draft/data.pt")
+    ap.add_argument("--shared-cache", action="store_true", help="drafter reads the target's (adapter-off) cache")
     a = ap.parse_args()
     random.seed(0); torch.manual_seed(0)
-    root = Path("runs/draft"); root.mkdir(parents=True, exist_ok=True); Path("results").mkdir(exist_ok=True)
+    root = Path("runs") / a.name; root.mkdir(parents=True, exist_ok=True); Path("results").mkdir(exist_ok=True)
     ds = load_dataset("openai/gsm8k", "main")
     tok = AutoTokenizer.from_pretrained("Qwen/Qwen3-0.6B", padding_side="left")
 
-    if (root / "data.pt").exists():
-        train, evald = torch.load(root / "data.pt")
+    if Path(a.data).exists():
+        train, evald = torch.load(a.data)
     else:
         t0 = time.time()
         qs = list(ds["train"]["question"][:a.n_train]) + list(ds["test"]["question"][:a.n_eval])
@@ -105,7 +107,7 @@ if __name__ == "__main__":
     avg = sum(len(d["comp"]) for d in train) / len(train)
     print(f"train {len(train)} completions, avg {avg:.0f} tokens; eval {len(evald)}", flush=True)
 
-    m = QwenLatentDiffusion(steps=0).cuda()  # no latent steps: pure block drafter
+    m = QwenLatentDiffusion(steps=0, prefix_adapter_off=a.shared_cache).cuda()  # no latent steps: pure block drafter
     end_id = tok.convert_tokens_to_ids("<|im_end|>")
     opt = torch.optim.AdamW(m.trainable(), lr=a.lr, weight_decay=0.0)
     hist = []
@@ -127,5 +129,5 @@ if __name__ == "__main__":
     for s in (1, 2, 4):
         t0 = time.time(); res["rollout"][f"denoise_steps_{s}"] = r = rollout(m, evald, a.K, s)
         r["seconds"] = time.time() - t0; print(s, json.dumps(r), flush=True)
-    Path("results/draft_probe.json").write_text(json.dumps(res, indent=1))
+    Path(f"results/draft_probe_{a.name}.json").write_text(json.dumps(res, indent=1))
     torch.save(m.extra_state(), root / "drafter.pt")

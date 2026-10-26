@@ -133,3 +133,24 @@ def test_latents_only_canvas_cannot_see_the_prompt(setup):
             m.canvas_latents_only = False
     assert (got - ref).abs().max() < TOL      # matches an uncached run where canvas rows skip the prompt
     assert (got - full).abs().max() > 1e-2    # and really differs from seeing the prompt
+
+
+def test_adapter_off_prefix_cache_equals_base_model_cache():
+    """With prefix_adapter_off the drafter's prefix KV must be exactly the un-adapted model's, even with a non-zero LoRA."""
+    from latent_diffusion.qwen_latent import QwenLatentDiffusion
+    torch.manual_seed(0)
+    base = QwenLatentDiffusion(steps=0, lora_r=0, dtype=torch.float32).eval()
+    drafter = QwenLatentDiffusion(steps=0, lora_r=4, dtype=torch.float32, prefix_adapter_off=True).eval()
+    for n, p in drafter.named_parameters():
+        if "lora_B" in n:
+            p.data.normal_(0, 0.5)  # make the adapter clearly non-trivial
+    batch = base.tok(["What is 2+3?", "A longer prompt about twelve times eleven"], return_tensors="pt", padding=True)
+    with torch.no_grad():
+        c0, pm, st, *_ = base.prefix(batch.input_ids, batch.attention_mask)
+        c1, pm1, st1, *_ = drafter.prefix(batch.input_ids, batch.attention_mask)
+        key = lambda c: c.layers[-1].keys if hasattr(c, "layers") else c.key_cache[-1]
+        assert (key(c0) - key(c1)).abs().max() < 1e-4
+        tokens = torch.full((2, 4), base.mask_id)
+        h_base = base.canvas_hidden(c0, pm, st, tokens)
+        h_draft = drafter.canvas_hidden(c1, pm1, st1, tokens)
+    assert (h_base - h_draft).abs().max() > 1e-2  # the adapter really acts on the canvas tokens
