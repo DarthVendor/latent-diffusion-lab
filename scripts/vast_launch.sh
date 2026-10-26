@@ -38,7 +38,9 @@ launch)
   onstart=$(mktemp)
   cat > "$onstart" <<ONSTART
 #!/bin/bash
-# watchdog first, so a hung job can never outlive the budget; it STOPS (keeps the disk) rather than destroys, so checkpoints survive for collect
+# the watchdog needs the vastai CLI, which the image does not ship: install it first (earlier launches had no working watchdog)
+pip install -q vastai || echo 'WARNING: vastai CLI install failed, the watchdog CANNOT stop this box'
+# watchdog next, so a hung job can never outlive the budget; it STOPS (keeps the disk) rather than destroys, so checkpoints survive for collect
 nohup bash -c 'sleep $((MAX_HOURS * 3600)); vastai set api-key \$CONTAINER_API_KEY; vastai stop instance \$CONTAINER_ID' >/dev/null 2>&1 &
 set -ex
 nvidia-smi
