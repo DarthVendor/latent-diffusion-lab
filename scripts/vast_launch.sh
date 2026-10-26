@@ -12,6 +12,9 @@ REF="${REF:-$(git rev-parse --abbrev-ref HEAD)}"
 # default job = Qwen AR benchmark; JOB=experiment runs scripts/run_experiment.sh (env TARGET/STEPS/SEEDS/EVAL_N pass through)
 if [ "${JOB:-bench}" = experiment ]; then
   JOB_CMD="TARGET=${TARGET:-answer} STEPS=${STEPS:-3000} SEEDS='${SEEDS:-0 1 2}' EVAL_N=${EVAL_N:-500} bash scripts/run_experiment.sh"
+elif [ "${JOB:-bench}" = cmd ]; then   # run an arbitrary command from the repo root: JOB=cmd CMD="python scripts/..."
+  JOB_CMD="$CMD
+touch results/DONE"
 elif [ "${JOB:-bench}" = probe ]; then
   JOB_CMD="python scripts/draft_probe.py
 touch results/DONE"
