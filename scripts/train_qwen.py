@@ -49,12 +49,18 @@ def encode(tok, rows, target, canvas, end_id):
     return enc.input_ids, enc.attention_mask, target_ids, [a for _, a, _ in items], [q for q, _, _ in items]
 
 
+def trim(ids, am):
+    """Drop left-padding columns that are padding for every row in this batch (prompts were padded to the dataset max)."""
+    first = am.any(0).nonzero()[0, 0]
+    return ids[:, first:], am[:, first:]
+
+
 @torch.no_grad()
 def diffusion_accuracy(m, data, canvas, steps, target, bs=16):
     m.eval(); ok, t0 = 0, time.time()
     ids, am, _, answers, _ = data
     for i in range(0, len(ids), bs):
-        out = m.generate(ids[i:i + bs].cuda(), am[i:i + bs].cuda(), canvas, steps)
+        out = m.generate(*(x.cuda() for x in trim(ids[i:i + bs], am[i:i + bs])), canvas, steps)
         for row, gold in zip(out.tolist(), answers[i:i + bs]):
             text = m.tok.decode(row[:row.index(m.end_id)] if m.end_id in row else row)
             ok += number(text, last=target == "solution") == number(gold)
@@ -127,7 +133,7 @@ if __name__ == "__main__":
     while step < a.steps:
         m.train()
         idx = torch.randint(len(tr[0]), (a.bs,))
-        loss = m.loss(tr[0][idx].cuda(), tr[1][idx].cuda(), tr[2][idx].cuda())
+        loss = m.loss(*(x.cuda() for x in trim(tr[0][idx], tr[1][idx])), tr[2][idx].cuda())
         opt.zero_grad(set_to_none=True); loss.backward()
         torch.nn.utils.clip_grad_norm_(m.trainable(), 1.0); opt.step(); step += 1
         if step % 10 == 0:
