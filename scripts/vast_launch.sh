@@ -9,6 +9,16 @@ set -euo pipefail
 GPU="${GPU:-RTX_4090}"; MAX_DPH="${MAX_DPH:-0.60}"; MAX_HOURS="${MAX_HOURS:-2}"; DISK="${DISK:-40}"
 REPO_URL="${REPO_URL:-https://github.com/DarthVendor/latent-diffusion-lab}"
 REF="${REF:-$(git rev-parse --abbrev-ref HEAD)}"
+# default job = Qwen AR benchmark; JOB=experiment runs scripts/run_experiment.sh (env TARGET/STEPS/SEEDS/EVAL_N pass through)
+if [ "${JOB:-bench}" = experiment ]; then
+  JOB_CMD="TARGET=${TARGET:-answer} STEPS=${STEPS:-3000} SEEDS='${SEEDS:-0 1 2}' EVAL_N=${EVAL_N:-500} bash scripts/run_experiment.sh"
+else
+  JOB_CMD="python scripts/bench_qwen_ar.py --smoke --out results/ar_smoke.json
+python scripts/bench_qwen_ar.py --out results/ar_baseline.json
+python scripts/bench_qwen_ar.py --compiled --smoke --out results/ar_compiled_smoke.json
+python scripts/bench_qwen_ar.py --compiled --out results/ar_compiled.json
+touch results/DONE"
+fi
 IMAGE="pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime"
 R=/workspace/latent-diffusion-lab
 
@@ -30,11 +40,7 @@ git clone --depth 1 --branch $REF $REPO_URL $R && cd $R
 apt-get update -qq && apt-get install -y -qq build-essential   # torch.compile needs a C compiler; the runtime image has none
 pip install -r requirements-gpu.txt && pip install -e .
 mkdir -p results runs
-python scripts/bench_qwen_ar.py --smoke --out results/ar_smoke.json    # fail fast if the GPU path is broken
-python scripts/bench_qwen_ar.py --out results/ar_baseline.json
-python scripts/bench_qwen_ar.py --compiled --smoke --out results/ar_compiled_smoke.json   # fail fast on compile problems
-python scripts/bench_qwen_ar.py --compiled --out results/ar_compiled.json
-touch results/DONE
+$JOB_CMD
 ONSTART
   vastai create instance "$id" --image "$IMAGE" --disk "$DISK" --onstart "$onstart" --raw
   echo "then: vastai logs <instance id>;  scripts/vast_launch.sh collect <instance id>"
