@@ -12,8 +12,10 @@ training:
   split_seed: 17
   device: cpu
   threads: 1
-  iterations: 500
-  lr: 0.003
-  eval_every: 100
+  iterations: 300
+  lr: 0.0003
+  eval_every: 50
   sampling_steps: 4
+  full_mask_prob: 0.75
+  stochastic_train: false
   output_dir: runs/addition
