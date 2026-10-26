@@ -154,3 +154,25 @@ def test_adapter_off_prefix_cache_equals_base_model_cache():
         h_base = base.canvas_hidden(c0, pm, st, tokens)
         h_draft = drafter.canvas_hidden(c1, pm1, st1, tokens)
     assert (h_base - h_draft).abs().max() > 1e-2  # the adapter really acts on the canvas tokens
+
+
+def _random_lora_model(mode, r, latents_only):
+    from latent_diffusion.qwen_latent import QwenLatentDiffusion
+    torch.manual_seed(0)
+    m = QwenLatentDiffusion(steps=r, lora_r=4, dtype=torch.float32, latent_mode=mode, canvas_latents_only=latents_only).eval()
+    for n, p in m.named_parameters():
+        if "lora_B" in n:
+            p.data.normal_(0, 0.02)   # LoRA starts as a no-op; make the merge actually change the weights
+    return m
+
+
+@pytest.mark.parametrize("denoise", [1, 3])
+@pytest.mark.parametrize("mode,r,latents_only", [("hidden", 3, False), ("mixture", 3, True), ("hidden", 0, False)])
+def test_static_cache_pipeline_matches_dynamic_generate(mode, r, latents_only, denoise):
+    from latent_diffusion.qwen_compiled import CompiledLatentDiffusion
+    m = _random_lora_model(mode, r, latents_only)   # the compiled path merges LoRA into m, so the reference runs first
+    b = m.tok(["What is 2+3?", "A much longer prompt: what is twelve times eleven, minus seven?"], return_tensors="pt", padding=True)
+    ref = m.generate(b.input_ids, b.attention_mask, 6, denoise)
+    got = CompiledLatentDiffusion(m, 2, b.input_ids.shape[1], canvas=6, max_latent=3, compile=False).generate(
+        b.input_ids, b.attention_mask, r, denoise)
+    assert torch.equal(ref, got)
