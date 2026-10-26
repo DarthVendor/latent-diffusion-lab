@@ -10,11 +10,14 @@ def corrupt(target, mask_id, pad_id):
         raise ValueError('every target needs at least one non-padding token')
     t = torch.rand(b, device=target.device).clamp(min=1e-3)
     masks = (torch.rand(target.shape, device=target.device) < t[:, None]) & valid
+    force_full = torch.rand(b, device=target.device) < full_mask_prob
+    masks[force_full] = valid[force_full]
     for i in range(b):
         if not masks[i].any():
             available = valid[i].nonzero(as_tuple=True)[0]
             j = available[torch.randint(len(available), (1,), device=target.device)]
             masks[i, j] = True
+    t = masks.float().sum(-1) / valid.float().sum(-1)
     return target.masked_fill(masks, mask_id), masks, t
 
 def masked_loss(logits, target, masks, t=None, weighted=False):
